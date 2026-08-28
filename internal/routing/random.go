@@ -30,6 +30,7 @@ func randomRoute(
 	targetDomain string,
 	authorities []string,
 	p2cWindow time.Duration,
+	maxLeasesPerIP int,
 ) (node.Hash, error) {
 	view := plat.View()
 	size := view.Size()
@@ -80,8 +81,8 @@ func randomRoute(
 	lat1, lat2 := compareLatencies(h1, h2, pool, targetDomain, authorities, p2cWindow)
 
 	// Calculate scores.
-	s1 := calculateScore(h1, lat1, plat, stats, pool)
-	s2 := calculateScore(h2, lat2, plat, stats, pool)
+	s1 := calculateScore(h1, lat1, plat, stats, pool, maxLeasesPerIP)
+	s2 := calculateScore(h2, lat2, plat, stats, pool, maxLeasesPerIP)
 
 	// Lower score is better.
 	selected := h2 // favor h2 on tie
@@ -135,12 +136,19 @@ func isRecent(t time.Time, now time.Time, window time.Duration) bool {
 
 // calculateScore computes the score for a node based on platform allocation policy.
 // Lower is better.
+// overCapLeasePenalty is added to a candidate's score once its egress IP has
+// reached MaxLeasesPerIP, pushing selection onto other (still fast) IPs. It is
+// large enough to dominate any latency/load term yet finite, so a capped IP is
+// still chosen as a last resort when every candidate is capped.
+const overCapLeasePenalty = 1e15
+
 func calculateScore(
 	h node.Hash,
 	latency time.Duration,
 	plat *platform.Platform,
 	stats *IPLoadStats,
 	pool PoolAccessor,
+	maxLeasesPerIP int,
 ) float64 {
 	entry, _ := pool.GetEntry(h)
 	// If entry is nil (race), treat as high load/latency?
@@ -156,21 +164,29 @@ func calculateScore(
 		}
 	}
 
+	// Reuse cap: once an egress IP already backs MaxLeasesPerIP accounts, add a
+	// dominating penalty so a less-loaded IP wins even under PREFER_LOW_LATENCY
+	// (which otherwise ignores lease count and piles everyone on the fastest IP).
+	var penalty float64
+	if maxLeasesPerIP > 0 && leaseCount >= int64(maxLeasesPerIP) {
+		penalty = overCapLeasePenalty
+	}
+
 	// If latency is 0 (empty/incompatible), score = LeaseCount strictly.
 	if latency <= 0 {
-		return float64(leaseCount)
+		return float64(leaseCount) + penalty
 	}
 
 	// Policy-based scoring.
 	switch plat.AllocationPolicy {
 	case platform.AllocationPolicyPreferLowLatency:
-		return float64(latency)
+		return float64(latency) + penalty
 	case platform.AllocationPolicyPreferIdleIP:
-		return float64(leaseCount)
+		return float64(leaseCount) + penalty
 	case platform.AllocationPolicyBalanced:
 		fallthrough
 	default:
 		// (LeaseCount + 1) * Latency
-		return float64(leaseCount+1) * float64(latency)
+		return float64(leaseCount+1)*float64(latency) + penalty
 	}
 }

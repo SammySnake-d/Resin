@@ -160,6 +160,9 @@ func (a *resinApp) initTopologyRuntime(engine *state.StateEngine) (*netutil.Retr
 		P2CWindow: func() time.Duration {
 			return time.Duration(runtimeConfigSnapshot(a.runtimeCfg).P2CLatencyWindow)
 		},
+		MaxLeasesPerIP: func() int {
+			return runtimeConfigSnapshot(a.runtimeCfg).MaxLeasesPerIP
+		},
 		NodeTagResolver: a.topoRuntime.pool.ResolveNodeDisplayTag,
 		// Lease events are emitted synchronously on routing paths.
 		// Keep this callback lightweight and non-blocking.

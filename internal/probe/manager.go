@@ -814,6 +814,9 @@ func (m *ProbeManager) performLatencyProbe(hash node.Hash, testURL string) error
 
 	m.pool.RecordResult(hash, true)
 	m.pool.RecordLatency(hash, domain, &latency)
+	// Re-evaluate the latency ceiling after recording the fresh sample: a slow
+	// but reachable node stays circuit-open so sticky leases migrate off it.
+	m.pool.EnforceLatencyCeiling(hash, domain)
 	return nil
 }
 

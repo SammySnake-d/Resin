@@ -48,6 +48,7 @@ type GlobalNodePool struct {
 	// Health config
 	maxLatencyTableEntries int
 	maxConsecutiveFailures func() int
+	maxRoutableLatencyMs   func() int // 0/nil = disabled
 	latencyDecayWindow     func() time.Duration
 	latencyAuthorities     func() []string
 }
@@ -63,6 +64,7 @@ type PoolConfig struct {
 	OnNodeLatencyChanged   func(hash node.Hash, domain string)
 	MaxLatencyTableEntries int
 	MaxConsecutiveFailures func() int
+	MaxRoutableLatencyMs   func() int // 0/nil = disabled
 	LatencyDecayWindow     func() time.Duration
 	LatencyAuthorities     func() []string
 }
@@ -92,6 +94,7 @@ func NewGlobalNodePool(cfg PoolConfig) *GlobalNodePool {
 		onNodeLatencyChanged:   cfg.OnNodeLatencyChanged,
 		maxLatencyTableEntries: cfg.MaxLatencyTableEntries,
 		maxConsecutiveFailures: maxConsecutiveFailuresFn,
+		maxRoutableLatencyMs:   cfg.MaxRoutableLatencyMs,
 		latencyDecayWindow:     cfg.LatencyDecayWindow,
 		latencyAuthorities:     cfg.LatencyAuthorities,
 		platformByID:           make(map[string]*platform.Platform),
@@ -585,6 +588,41 @@ func (p *GlobalNodePool) passiveCircuitBreakerDisabled(platformID string) bool {
 
 func (p *GlobalNodePool) currentMaxConsecutiveFailures() int {
 	return p.maxConsecutiveFailures()
+}
+
+// EnforceLatencyCeiling opens a node's circuit when its smoothed (EWMA) latency
+// to domain exceeds the configured MaxRoutableLatencyMs ceiling, making the node
+// unhealthy/unroutable so sticky leases migrate to a faster node. It is called
+// right after a successful latency probe (which has already cleared the circuit
+// and reset failures via RecordResult): nodes at or under the ceiling stay
+// healthy and keep their sticky leases; a node that later recovers under the
+// ceiling clears automatically on its next successful probe. A ceiling of 0 (or
+// a nil accessor) disables the behavior, so latency only affects P2C selection.
+func (p *GlobalNodePool) EnforceLatencyCeiling(hash node.Hash, domain string) {
+	if p.maxRoutableLatencyMs == nil {
+		return
+	}
+	ceilMs := p.maxRoutableLatencyMs()
+	if ceilMs <= 0 {
+		return
+	}
+	entry, ok := p.nodes.Load(hash)
+	if !ok || entry.LatencyTable == nil {
+		return
+	}
+	stats, ok := entry.LatencyTable.GetDomainStats(domain)
+	if !ok {
+		return
+	}
+	if float64(stats.Ewma)/float64(time.Millisecond) <= float64(ceilMs) {
+		return
+	}
+	if entry.CircuitOpenSince.CompareAndSwap(0, time.Now().UnixNano()) {
+		p.notifyAllPlatformsDirty(hash)
+		if p.onNodeDynamicChanged != nil {
+			p.onNodeDynamicChanged(hash)
+		}
+	}
 }
 
 // RecordLatency records a latency probe attempt for the given node and raw target.

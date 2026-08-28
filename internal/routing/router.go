@@ -32,6 +32,7 @@ type Router struct {
 	states          *xsync.Map[string, *PlatformRoutingState]
 	authorities     func() []string
 	p2cWindow       func() time.Duration
+	maxLeasesPerIP  func() int
 	onLeaseEvent    LeaseEventFunc
 	nodeTagResolver func(node.Hash) string
 }
@@ -40,6 +41,8 @@ type RouterConfig struct {
 	Pool        PoolAccessor
 	Authorities func() []string
 	P2CWindow   func() time.Duration
+	// MaxLeasesPerIP caps distinct accounts pinned to one egress IP (0 = off).
+	MaxLeasesPerIP func() int
 	// OnLeaseEvent is called synchronously; handlers must stay lightweight.
 	OnLeaseEvent LeaseEventFunc
 	// NodeTagResolver resolves a node hash to its display tag ("<Sub>/<Tag>").
@@ -53,6 +56,7 @@ func NewRouter(cfg RouterConfig) *Router {
 		states:          xsync.NewMap[string, *PlatformRoutingState](),
 		authorities:     cfg.Authorities,
 		p2cWindow:       cfg.P2CWindow,
+		maxLeasesPerIP:  cfg.MaxLeasesPerIP,
 		onLeaseEvent:    cfg.OnLeaseEvent,
 		nodeTagResolver: cfg.NodeTagResolver,
 	}
@@ -393,9 +397,13 @@ func (r *Router) selectLiveRandomRoute(
 	stats *IPLoadStats,
 	targetDomain string,
 ) (node.Hash, *node.NodeEntry, error) {
+	maxLeases := 0
+	if r.maxLeasesPerIP != nil {
+		maxLeases = r.maxLeasesPerIP()
+	}
 	var lastMissing node.Hash
 	for i := 0; i < livePickAttempts; i++ {
-		h, err := randomRoute(plat, stats, r.pool, targetDomain, r.authorities(), r.p2cWindow())
+		h, err := randomRoute(plat, stats, r.pool, targetDomain, r.authorities(), r.p2cWindow(), maxLeases)
 		if err != nil {
 			return node.Zero, nil, err
 		}
