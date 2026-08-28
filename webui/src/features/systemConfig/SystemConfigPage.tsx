@@ -22,6 +22,8 @@ type RuntimeConfigForm = {
   reverse_proxy_log_resp_headers_max_bytes: string;
   reverse_proxy_log_resp_body_max_bytes: string;
   max_consecutive_failures: string;
+  max_routable_latency_ms: string;
+  max_leases_per_ip: string;
   max_latency_test_interval: string;
   max_authority_latency_test_interval: string;
   max_egress_test_interval: string;
@@ -41,6 +43,8 @@ const EDITABLE_FIELDS: Array<keyof RuntimeConfig> = [
   "reverse_proxy_log_resp_headers_max_bytes",
   "reverse_proxy_log_resp_body_max_bytes",
   "max_consecutive_failures",
+  "max_routable_latency_ms",
+  "max_leases_per_ip",
   "max_latency_test_interval",
   "max_authority_latency_test_interval",
   "max_egress_test_interval",
@@ -60,6 +64,8 @@ const FIELD_LABELS: Record<keyof RuntimeConfig, string> = {
   reverse_proxy_log_resp_headers_max_bytes: "响应头最大字节数",
   reverse_proxy_log_resp_body_max_bytes: "响应体最大字节数",
   max_consecutive_failures: "最大连续失败次数",
+  max_routable_latency_ms: "路由延迟上限 ms (超阈值熔断/切换, 0=禁用)",
+  max_leases_per_ip: "每出口IP最大账号数 (0=不限)",
   max_latency_test_interval: "节点延迟最大测试间隔",
   max_authority_latency_test_interval: "权威域名最大测试间隔",
   max_egress_test_interval: "出口 IP 更新检查间隔",
@@ -97,6 +103,8 @@ function configToForm(config: RuntimeConfig): RuntimeConfigForm {
     reverse_proxy_log_resp_headers_max_bytes: String(config.reverse_proxy_log_resp_headers_max_bytes),
     reverse_proxy_log_resp_body_max_bytes: String(config.reverse_proxy_log_resp_body_max_bytes),
     max_consecutive_failures: String(config.max_consecutive_failures),
+    max_routable_latency_ms: String(config.max_routable_latency_ms),
+    max_leases_per_ip: String(config.max_leases_per_ip),
     max_latency_test_interval: config.max_latency_test_interval,
     max_authority_latency_test_interval: config.max_authority_latency_test_interval,
     max_egress_test_interval: config.max_egress_test_interval,
@@ -168,6 +176,8 @@ function parseForm(form: RuntimeConfigForm): RuntimeConfig {
       form.reverse_proxy_log_resp_body_max_bytes,
     ),
     max_consecutive_failures: parseNonNegativeInt("最大连续失败次数", form.max_consecutive_failures),
+    max_routable_latency_ms: parseNonNegativeInt("路由延迟上限 ms", form.max_routable_latency_ms),
+    max_leases_per_ip: parseNonNegativeInt("每出口IP最大账号数", form.max_leases_per_ip),
     max_latency_test_interval: parseDurationField("节点延迟最大测试间隔", form.max_latency_test_interval),
     max_authority_latency_test_interval: parseDurationField(
       "权威域名最大测试间隔",
@@ -473,6 +483,36 @@ export function SystemConfigPage() {
                       min={0}
                       value={form.max_consecutive_failures}
                       onChange={(event) => setFormField("max_consecutive_failures", event.target.value)}
+                    />
+                  </div>
+                  <div className="field-group">
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                      <label className="field-label" htmlFor="sys-max-lat" style={{ margin: 0 }}>
+                        {t("路由延迟上限 ms (超阈值熔断/切换, 0=禁用)")}
+                      </label>
+                      {renderRestoreButton("max_routable_latency_ms")}
+                    </div>
+                    <Input
+                      id="sys-max-lat"
+                      type="number"
+                      min={0}
+                      value={form.max_routable_latency_ms}
+                      onChange={(event) => setFormField("max_routable_latency_ms", event.target.value)}
+                    />
+                  </div>
+                  <div className="field-group">
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                      <label className="field-label" htmlFor="sys-max-leases" style={{ margin: 0 }}>
+                        {t("每出口IP最大账号数 (0=不限)")}
+                      </label>
+                      {renderRestoreButton("max_leases_per_ip")}
+                    </div>
+                    <Input
+                      id="sys-max-leases"
+                      type="number"
+                      min={0}
+                      value={form.max_leases_per_ip}
+                      onChange={(event) => setFormField("max_leases_per_ip", event.target.value)}
                     />
                   </div>
                 </div>
